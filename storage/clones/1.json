@@ -1,0 +1,12 @@
+{
+    "id": 1,
+    "name": "Rar",
+    "source_container": "Mawared-fe",
+    "container_id": "c8240df7bbce3fcf9af39479eab7b05de7650b2ec840ddeb9f2c631749f5ec99",
+    "container_name": "orc-rar",
+    "image": "orc-rar:20260909193600",
+    "volumes_json": "{\"\\\/tmp\\\/orc\\\/clones\\\/vol_6aa18b56410bb4.62876458\":\"\\\/var\\\/www\\\/attendance-fe\"}",
+    "branches_json": "{\"\\\/var\\\/www\\\/attendance-fe\":{\"branch\":\"_2026-09-09_19-35-55\",\"base_branch\":\"Fix_credit_2026-07-15_20_38_30\"}}",
+    "status": "running",
+    "created_at": "2026-09-09 19:38:11"
+}

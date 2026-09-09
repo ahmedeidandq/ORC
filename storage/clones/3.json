@@ -1,0 +1,12 @@
+{
+    "id": 3,
+    "name": "Test",
+    "source_container": "mysql",
+    "container_id": "",
+    "container_name": "orc-test",
+    "image": "orc-test:20260909200414",
+    "volumes_json": "{\"\\\/tmp\\\/orc\\\/clones\\\/vol_6aa1918f6db243.73022579\":\"\\\/var\\\/lib\\\/mysql\"}",
+    "branches_json": "[]",
+    "status": "running",
+    "created_at": "2026-09-09 20:05:01"
+}

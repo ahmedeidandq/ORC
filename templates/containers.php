@@ -234,14 +234,22 @@ function loadBranches(containerName) {
         fields[i].style.display = 'none';
     }
 
+    var existingMsg = form.querySelector('.branches-status');
+    if (existingMsg) existingMsg.remove();
+
     fetch('?page=branches&container=' + encodeURIComponent(containerName))
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
         .then(function(data) {
             if (!data || typeof data !== 'object') return;
+            var foundAny = false;
             for (var path in data) {
                 if (!data.hasOwnProperty(path)) continue;
                 var hidden = form.querySelector('input.searchable-value[name="base_branch[' + path + ']"]');
                 if (!hidden) continue;
+                foundAny = true;
                 var ss = hidden.closest('.searchable-select');
                 var list = ss.querySelector('.searchable-list');
                 var container = ss.closest('.branch-fields');
@@ -270,7 +278,23 @@ function loadBranches(containerName) {
                 initSearchableSelect(ss);
                 if (container) container.style.display = 'block';
             }
+            if (!foundAny) {
+                var msg = document.createElement('div');
+                msg.className = 'branches-status';
+                msg.style.cssText = 'color: var(--muted); font-size: 0.75rem; margin-top: 0.4rem; margin-left: 1.5rem;';
+                msg.textContent = 'No git repositories found in volumes.';
+                var checkboxGroup = form.querySelector('.checkbox-group');
+                if (checkboxGroup) checkboxGroup.appendChild(msg);
+            }
         })
-        .catch(function() {});
+        .catch(function(err) {
+            console.error('Failed to load branches:', err);
+            var msg = document.createElement('div');
+            msg.className = 'branches-status';
+            msg.style.cssText = 'color: var(--alert-error-fg); font-size: 0.75rem; margin-top: 0.4rem; margin-left: 1.5rem;';
+            msg.textContent = 'Failed to load branches. Is the source container running?';
+            var checkboxGroup = form.querySelector('.checkbox-group');
+            if (checkboxGroup) checkboxGroup.appendChild(msg);
+        });
 }
 </script>

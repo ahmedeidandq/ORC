@@ -159,27 +159,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$containerList = Docker::listContainers();
-$clones = ContainerClone::all();
-
-foreach ($clones as $key => $clone) {
-    $clones[$key]['status'] = ContainerClone::refreshStatus($clone['id']);
-    $clones[$key]['ip'] = ($clones[$key]['status'] === 'running') ? Docker::getIpAddress($clone['container_name']) : '';
-    $clones[$key]['volumes'] = json_decode($clone['volumes_json'], true);
-    if (!$clones[$key]['volumes']) {
-        $clones[$key]['volumes'] = array();
-    }
-    $clones[$key]['branches'] = json_decode($clone['branches_json'], true);
-    if (!$clones[$key]['branches']) {
-        $clones[$key]['branches'] = array();
-    }
-}
-
 if ($basePage === 'branches') {
     header('Content-Type: application/json');
     $containerName = isset($_GET['container']) ? $_GET['container'] : '';
     if ($containerName === '') {
         echo json_encode(array('error' => 'container name required'));
+        exit;
+    }
+
+    $status = Docker::getStatus($containerName);
+    if ($status !== 'running') {
+        Logger::log("BRANCHES: container '$containerName' is $status");
+        echo json_encode(array());
         exit;
     }
 
@@ -212,11 +203,33 @@ if ($basePage === 'branches') {
                 'current'  => $current,
                 'branches' => $branches,
             );
+        } else {
+            Logger::log("BRANCHES: no .git at $dest in '$containerName'");
         }
+    }
+
+    if (empty($result)) {
+        Logger::log("BRANCHES: no git repos found in '$containerName'");
     }
 
     echo json_encode($result);
     exit;
+}
+
+$containerList = Docker::listContainers();
+$clones = ContainerClone::all();
+
+foreach ($clones as $key => $clone) {
+    $clones[$key]['status'] = ContainerClone::refreshStatus($clone['id']);
+    $clones[$key]['ip'] = ($clones[$key]['status'] === 'running') ? Docker::getIpAddress($clone['container_name']) : '';
+    $clones[$key]['volumes'] = json_decode($clone['volumes_json'], true);
+    if (!$clones[$key]['volumes']) {
+        $clones[$key]['volumes'] = array();
+    }
+    $clones[$key]['branches'] = json_decode($clone['branches_json'], true);
+    if (!$clones[$key]['branches']) {
+        $clones[$key]['branches'] = array();
+    }
 }
 
 if ($basePage === 'logs') {

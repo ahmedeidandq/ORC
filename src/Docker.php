@@ -7,7 +7,7 @@ class Docker
         $config = require __DIR__ . '/../config.php';
         $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'orc-';
 
-        $output = shell_exec("docker ps --format '{\"id\":\"{{.ID}}\",\"name\":\"{{.Names}}\",\"image\":\"{{.Image}}\",\"status\":\"{{.Status}}\"}' 2>/dev/null");
+        $output = shell_exec("docker ps --size --format '{\"id\":\"{{.ID}}\",\"name\":\"{{.Names}}\",\"image\":\"{{.Image}}\",\"status\":\"{{.Status}}\",\"size\":\"{{.Size}}\"}' 2>/dev/null");
         if ($output === null || $output === '') {
             return array();
         }
@@ -183,6 +183,39 @@ class Docker
             }
         }
         return $volumes;
+    }
+
+    public static function listImages()
+    {
+        $config = require __DIR__ . '/../config.php';
+        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'orc-';
+
+        $output = shell_exec("docker images --format '{\"repo\":\"{{.Repository}}\",\"tag\":\"{{.Tag}}\",\"id\":\"{{.ID}}\",\"size\":\"{{.Size}}\",\"created\":\"{{.CreatedSince}}\"}' 2>/dev/null");
+        if ($output === null || $output === '') {
+            return array();
+        }
+
+        $images = array();
+        foreach (explode("\n", trim($output)) as $line) {
+            $line = trim($line);
+            if ($line === '') continue;
+            $data = json_decode($line, true);
+            if ($data && strpos($data['repo'], $prefix) === 0) {
+                $images[] = $data;
+            }
+        }
+
+        return $images;
+    }
+
+    public static function inspectImage($image)
+    {
+        $escaped = escapeshellarg($image);
+        $output = shell_exec("docker inspect $escaped 2>/dev/null");
+        if ($output === null || $output === '') return null;
+
+        $data = json_decode($output, true);
+        return (is_array($data) && isset($data[0])) ? $data[0] : null;
     }
 
     private static function removeDir($dir)

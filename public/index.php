@@ -115,6 +115,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    if ($action === 'create_from_image') {
+        Logger::log("POST create_from_image: " . json_encode($_POST));
+
+        $name = trim(isset($_POST['name']) ? $_POST['name'] : '');
+        $imageName = trim(isset($_POST['image']) ? $_POST['image'] : '');
+        $hostPaths = isset($_POST['host_path']) ? $_POST['host_path'] : array();
+        $containerPaths = isset($_POST['container_path']) ? $_POST['container_path'] : array();
+
+        if ($name === '') {
+            $error = 'Container name is required.';
+        } elseif ($imageName === '') {
+            $error = 'Image name is required.';
+        } else {
+            $volumeMappings = array();
+            $count = count($hostPaths);
+            for ($i = 0; $i < $count; $i++) {
+                $hp = trim($hostPaths[$i]);
+                $cp = trim($containerPaths[$i]);
+                if ($hp !== '' && $cp !== '') {
+                    $volumeMappings[$hp] = $cp;
+                }
+            }
+
+            try {
+                ContainerClone::createFromImage($name, $imageName, $volumeMappings);
+                $success = 'Container "' . htmlspecialchars($name) . '" created from image.';
+            } catch (Exception $e) {
+                $error = 'Failed to create container: ' . $e->getMessage();
+            }
+            header('Location: ?page=clones');
+            exit;
+        }
+    }
+
     if ($action === 'open_terminal') {
         $cloneId = isset($_POST['clone_id']) ? (int) $_POST['clone_id'] : 0;
         if ($cloneId) {
@@ -242,10 +276,18 @@ if ($basePage === 'logs') {
     exit;
 }
 
+$imageList = array();
+if ($basePage === 'images') {
+    $imageList = Docker::listImages();
+}
+
 ob_start();
 switch ($basePage) {
     case 'containers':
         require __DIR__ . '/../templates/containers.php';
+        break;
+    case 'images':
+        require __DIR__ . '/../templates/images.php';
         break;
     case 'clones':
         require __DIR__ . '/../templates/clones.php';

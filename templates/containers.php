@@ -13,6 +13,7 @@
                 <tr>
                     <th>Container</th>
                     <th>Image</th>
+                    <th>Size</th>
                     <th>Status</th>
                     <th>Actions</th>
                 </tr>
@@ -22,6 +23,7 @@
                     <tr>
                         <td><strong><?= htmlspecialchars($c['name']) ?></strong></td>
                         <td><code><?= htmlspecialchars($c['image']) ?></code></td>
+                        <td><code><?= htmlspecialchars($c['size'] ?? '') ?></code></td>
                         <td><?= htmlspecialchars($c['status']) ?></td>
                         <td>
                             <div class="actions">
@@ -41,7 +43,7 @@
                         </td>
                     </tr>
                     <tr id="clone-form-<?= htmlspecialchars($c['name']) ?>" style="display: none;">
-                        <td colspan="4">
+                        <td colspan="5">
                             <form method="POST" action="?page=containers" style="background: var(--card-bg); padding: 1rem; border-radius: 0.5rem;">
                                 <input type="hidden" name="action" value="create_clone">
                                 <input type="hidden" name="container" value="<?= htmlspecialchars($c['name']) ?>">

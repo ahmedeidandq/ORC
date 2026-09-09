@@ -113,6 +113,57 @@ class ContainerClone
         return $clone;
     }
 
+    public static function createFromImage($name, $imageName, array $volumeMappings = array())
+    {
+        $config = require __DIR__ . '/../config.php';
+
+        Logger::log("CREATE FROM IMAGE: name=$name, image=$imageName, volumes=" . json_encode($volumeMappings));
+
+        $containerName = $config['containerPrefix'] . strtolower($name);
+
+        $imageInfo = Docker::inspectImage($imageName);
+        $baseImage = $imageInfo ? (isset($imageInfo['Config']['Image']) ? $imageInfo['Config']['Image'] : '') : $imageName;
+
+        $runCmd = array();
+        $entrypoint = '';
+        if (preg_match('/apache/', $baseImage)) {
+            $runCmd = array('apache2-foreground');
+        } elseif (preg_match('/nginx/', $baseImage)) {
+            $runCmd = array('nginx', '-g', 'daemon off;');
+        } elseif (preg_match('/mysql|mariadb/', $baseImage)) {
+            $runCmd = array('mysqld');
+        } elseif (preg_match('/postgres/', $baseImage)) {
+            $runCmd = array('postgres');
+        } elseif (preg_match('/redis/', $baseImage)) {
+            $runCmd = array('redis-server');
+        } elseif (preg_match('/node/', $baseImage)) {
+            $entrypoint = '/bin/sh';
+            $runCmd = array('-c', 'while true; do sleep 1000; done');
+        } else {
+            $entrypoint = '/bin/sh';
+            $runCmd = array('-c', 'while true; do sleep 1000; done');
+        }
+
+        Logger::log("FROM IMAGE: baseImage=$baseImage, entrypoint=$entrypoint, runCmd=" . json_encode($runCmd));
+        $containerId = Docker::run($containerName, $imageName, $volumeMappings, array(), $entrypoint, $runCmd);
+
+        $clone = array(
+            'id'               => Database::nextCloneId(),
+            'name'             => $name,
+            'source_container' => $imageName,
+            'container_id'     => $containerId,
+            'container_name'   => $containerName,
+            'image'            => $imageName,
+            'volumes_json'     => json_encode($volumeMappings),
+            'branches_json'    => json_encode(array()),
+            'status'           => $containerId ? 'running' : 'not_found',
+            'created_at'       => date('Y-m-d H:i:s'),
+        );
+
+        Database::saveClone($clone);
+        return $clone;
+    }
+
     public static function get($id)
     {
         return Database::getClone($id);

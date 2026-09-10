@@ -2,6 +2,9 @@
 
 return [
     'cloneStoragePath' => '/tmp/orc/clones',
-    'containerPrefix'  => 'orc-',
+    'containerPrefix'  => 'ORC-',
     'editor'           => 'subl',
+    'opencodeBinary'   => 'opencode',
+    'opencodePort'     => 4096,
+    'opencodePassword' => '',
 ];

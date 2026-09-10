@@ -5,7 +5,8 @@ class Docker
     public static function listContainers()
     {
         $config = require __DIR__ . '/../config.php';
-        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'orc-';
+        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'ORC-';
+        $prefixLower = strtolower($prefix);
 
         $output = shell_exec("docker ps --size --format '{\"id\":\"{{.ID}}\",\"name\":\"{{.Names}}\",\"image\":\"{{.Image}}\",\"status\":\"{{.Status}}\",\"size\":\"{{.Size}}\"}' 2>/dev/null");
         if ($output === null || $output === '') {
@@ -18,12 +19,38 @@ class Docker
             if ($line === '') continue;
             $data = json_decode($line, true);
             if ($data) {
-                if (strpos($data['name'], $prefix) === 0) {
+                if (strpos(strtolower($data['name']), $prefixLower) === 0) {
                     continue;
                 }
                 $data['volumes'] = self::inspectVolumes($data['id']);
                 $containers[] = $data;
             }
+        }
+
+        return $containers;
+    }
+
+    public static function listAllContainers()
+    {
+        $config = require __DIR__ . '/../config.php';
+        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'ORC-';
+        $prefixLower = strtolower($prefix);
+
+        $output = shell_exec("docker ps -a --format '{\"id\":\"{{.ID}}\",\"name\":\"{{.Names}}\",\"image\":\"{{.Image}}\",\"status\":\"{{.Status}}\",\"size\":\"{{.Size}}\"}' 2>/dev/null");
+        if ($output === null || $output === '') {
+            return array();
+        }
+
+        $containers = array();
+        foreach (explode("\n", trim($output)) as $line) {
+            $line = trim($line);
+            if ($line === '') continue;
+            $data = json_decode($line, true);
+            if (!$data) continue;
+
+            $data['is_clone'] = (strpos(strtolower($data['name']), $prefixLower) === 0);
+            $data['running'] = (strpos($data['status'], 'Up') === 0);
+            $containers[] = $data;
         }
 
         return $containers;
@@ -163,7 +190,17 @@ class Docker
     {
         $escaped = escapeshellarg($containerName);
         $output = shell_exec("docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $escaped 2>/dev/null");
-        return trim($output ? $output : '');
+        $ip = trim($output ? $output : '');
+        if ($ip !== '') {
+            return $ip;
+        }
+
+        $netMode = shell_exec("docker inspect --format='{{.HostConfig.NetworkMode}}' $escaped 2>/dev/null");
+        if (trim($netMode) === 'host') {
+            return '127.0.0.1';
+        }
+
+        return '';
     }
 
     public static function inspectVolumes($containerId)
@@ -188,7 +225,8 @@ class Docker
     public static function listImages()
     {
         $config = require __DIR__ . '/../config.php';
-        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'orc-';
+        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'ORC-';
+        $prefixLower = strtolower($prefix);
 
         $output = shell_exec("docker images --format '{\"repo\":\"{{.Repository}}\",\"tag\":\"{{.Tag}}\",\"id\":\"{{.ID}}\",\"size\":\"{{.Size}}\",\"created\":\"{{.CreatedSince}}\"}' 2>/dev/null");
         if ($output === null || $output === '') {
@@ -200,9 +238,33 @@ class Docker
             $line = trim($line);
             if ($line === '') continue;
             $data = json_decode($line, true);
-            if ($data && strpos($data['repo'], $prefix) === 0) {
+            if ($data && strpos(strtolower($data['repo']), $prefixLower) === 0) {
                 $images[] = $data;
             }
+        }
+
+        return $images;
+    }
+
+    public static function listAllImages()
+    {
+        $config = require __DIR__ . '/../config.php';
+        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'ORC-';
+        $prefixLower = strtolower($prefix);
+
+        $output = shell_exec("docker images --format '{\"repo\":\"{{.Repository}}\",\"tag\":\"{{.Tag}}\",\"id\":\"{{.ID}}\",\"size\":\"{{.Size}}\",\"created\":\"{{.CreatedSince}}\"}' 2>/dev/null");
+        if ($output === null || $output === '') {
+            return array();
+        }
+
+        $images = array();
+        foreach (explode("\n", trim($output)) as $line) {
+            $line = trim($line);
+            if ($line === '') continue;
+            $data = json_decode($line, true);
+            if (!$data || !isset($data['repo'])) continue;
+            $data['is_clone'] = (strpos(strtolower($data['repo']), $prefixLower) === 0);
+            $images[] = $data;
         }
 
         return $images;
@@ -216,6 +278,24 @@ class Docker
 
         $data = json_decode($output, true);
         return (is_array($data) && isset($data[0])) ? $data[0] : null;
+    }
+
+    public static function imageExists($image)
+    {
+        $escaped = escapeshellarg($image);
+        $output = shell_exec("docker image inspect $escaped 2>/dev/null");
+        return ($output !== null && $output !== '' && trim($output) !== '[]');
+    }
+
+    public static function removeImage($repoTag)
+    {
+        $escaped = escapeshellarg($repoTag);
+        $cmd = "docker rmi -f $escaped 2>&1";
+        Logger::log("RMI CMD: $cmd");
+        $output = shell_exec($cmd);
+        $output = trim($output ? $output : '');
+        Logger::log("RMI OUTPUT: " . ($output ?: '(empty)'));
+        return $output;
     }
 
     private static function removeDir($dir)

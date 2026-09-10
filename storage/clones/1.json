@@ -1,0 +1,12 @@
+{
+    "id": 1,
+    "name": "test",
+    "source_container": "Mawared",
+    "container_id": "214cab5d99f5969234171b268be7ac9bf0f46f270a8b60b07eda311d1e8cdf26",
+    "container_name": "ORC-test",
+    "image": "orc-test:20260910150546",
+    "volumes_json": "{\"\\\/tmp\\\/orc\\\/clones\\\/vol_6aa29d5340cbb5.18246804\":\"\\\/var\\\/www\\\/Mawared\"}",
+    "branches_json": "{\"\\\/var\\\/www\\\/Mawared\":{\"branch\":\"_2026-09-10_15-05-45\",\"base_branch\":\"master\"}}",
+    "status": "running",
+    "created_at": "2026-09-10 15:07:05"
+}

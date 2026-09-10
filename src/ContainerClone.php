@@ -6,17 +6,26 @@ class ContainerClone
     {
         $config = require __DIR__ . '/../config.php';
 
-        Logger::log("CLONE START: name=$name, source=$sourceContainer, volumes=" . json_encode($volumes) . ", branches=" . json_encode($branches));
+        $cleanName = self::sanitizeName($name);
+        if ($cleanName === '') {
+            throw new Exception('Invalid clone name. Use letters, digits, "-", "_", "." only.');
+        }
+        if ($cleanName !== $name) {
+            Logger::log("CLONE START: name=$name -> sanitized=$cleanName, source=$sourceContainer, volumes=" . json_encode($volumes) . ", branches=" . json_encode($branches));
+        } else {
+            Logger::log("CLONE START: name=$name, source=$sourceContainer, volumes=" . json_encode($volumes) . ", branches=" . json_encode($branches));
+        }
 
-        $imageName = $config['containerPrefix'] . strtolower($name) . ':' . date('YmdHis');
+        $imageName = strtolower($config['containerPrefix']) . $cleanName . ':' . date('YmdHis');
 
-        $existingImage = self::findExistingImage($sourceContainer);
-        if ($existingImage) {
-            $imageName = $existingImage;
+        $resolved = self::resolveCommittedImage($sourceContainer, $cleanName);
+        if ($resolved) {
+            $imageName = $resolved;
             Logger::log("REUSE IMAGE: $imageName");
         } else {
             Logger::log("COMMIT: $sourceContainer -> $imageName");
             Docker::commit($sourceContainer, $imageName);
+            Database::saveImageMapping($sourceContainer, $imageName);
         }
 
         $volumeMappings = array();
@@ -33,7 +42,7 @@ class ContainerClone
             $volumeMappings[$hostPath] = $containerPath;
         }
 
-        $containerName = $config['containerPrefix'] . strtolower($name);
+        $containerName = $config['containerPrefix'] . $cleanName;
 
         $sourceInfo = Docker::inspect($sourceContainer);
         $sourceImage = isset($sourceInfo['Config']['Image']) ? $sourceInfo['Config']['Image'] : '';
@@ -98,7 +107,7 @@ class ContainerClone
 
         $clone = array(
             'id'               => Database::nextCloneId(),
-            'name'             => $name,
+            'name'             => $cleanName,
             'source_container' => $sourceContainer,
             'container_id'     => $containerId,
             'container_name'   => $containerName,
@@ -212,6 +221,8 @@ class ContainerClone
             foreach ($volumeMappings as $hostPath => $containerPath) {
                 if (is_dir($hostPath)) {
                     self::removeDir($hostPath);
+                } elseif (is_file($hostPath)) {
+                    unlink($hostPath);
                 }
             }
         }
@@ -266,21 +277,80 @@ class ContainerClone
         rmdir($dir);
     }
 
-    private static function findExistingImage($sourceContainer)
+    public static function sanitizeName($name)
     {
-        $existingClones = Database::getAllClones();
-        foreach ($existingClones as $clone) {
-            if ($clone['source_container'] === $sourceContainer && !empty($clone['image'])) {
-                $check = shell_exec("docker inspect --format='{{.Config.Image}}' " . escapeshellarg($clone['image']) . " 2>/dev/null");
-                $check = trim($check ? $check : '');
-                $sourceInfo = Docker::inspect($sourceContainer);
-                $sourceImage = $sourceInfo ? (isset($sourceInfo['Config']['Image']) ? $sourceInfo['Config']['Image'] : '') : '';
-                if ($check === $sourceImage) {
-                    return $clone['image'];
+        $name = strtolower(trim($name));
+        $name = preg_replace('/[^a-z0-9_.-]/', '-', $name);
+        $name = preg_replace('/-+/', '-', $name);
+        $name = trim($name, '.-');
+        return $name;
+    }
+
+    public static function resolveCommittedImage($sourceContainer, $cleanName = '')
+    {
+        $config = require __DIR__ . '/../config.php';
+        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'ORC-';
+        $prefixLower = strtolower($prefix);
+
+        $candidates = array();
+
+        $mappings = Database::getImageMappingsBySource($sourceContainer);
+        foreach ($mappings as $m) {
+            if (!empty($m['image'])) {
+                $candidates[] = $m['image'];
+            }
+        }
+
+        if ($cleanName !== '') {
+            foreach (Docker::listImages() as $img) {
+                $repoTag = $img['repo'] . ':' . $img['tag'];
+                if ($img['repo'] === $prefixLower . $cleanName) {
+                    $candidates[] = $repoTag;
                 }
             }
         }
 
+        $candidates = array_values(array_unique($candidates));
+        usort($candidates, function ($a, $b) {
+            return strcmp($b, $a);
+        });
+
+        foreach ($candidates as $tag) {
+            if (Docker::imageExists($tag)) {
+                return $tag;
+            }
+            Database::deleteImageMapping($sourceContainer, $tag);
+        }
+
         return null;
+    }
+
+    public static function committedImagesBySource()
+    {
+        $result = array();
+        $mappings = Database::getAllImageMappings();
+        foreach ($mappings as $m) {
+            $source = isset($m['source_container']) ? $m['source_container'] : '';
+            $image = isset($m['image']) ? $m['image'] : '';
+            if ($source === '' || $image === '' || !Docker::imageExists($image)) {
+                if ($image !== '') {
+                    Database::deleteImageMapping($source, $image);
+                }
+                continue;
+            }
+            if (!isset($result[$source])) {
+                $result[$source] = array();
+            }
+            $result[$source][] = $image;
+        }
+
+        foreach ($result as $source => &$tags) {
+            usort($tags, function ($a, $b) {
+                return strcmp($b, $a);
+            });
+        }
+        unset($tags);
+
+        return $result;
     }
 }

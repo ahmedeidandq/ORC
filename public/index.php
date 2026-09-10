@@ -4,6 +4,21 @@ require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/Logger.php';
 require_once __DIR__ . '/../src/Docker.php';
 require_once __DIR__ . '/../src/ContainerClone.php';
+require_once __DIR__ . '/../src/Opencode.php';
+
+function orc_redirect($url, $error = '', $success = '')
+{
+    $sep = (strpos($url, '?') !== false) ? '&' : '?';
+    if ($error !== '') {
+        $url .= $sep . 'error=' . rawurlencode($error);
+        $sep = '&';
+    }
+    if ($success !== '') {
+        $url .= $sep . 'success=' . rawurlencode($success);
+    }
+    header('Location: ' . $url);
+    exit;
+}
 
 Database::init();
 
@@ -12,8 +27,8 @@ $page = isset($_GET['page']) ? $_GET['page'] : 'containers';
 $segments = explode('/', trim($page, '/'));
 $basePage = isset($segments[0]) ? $segments[0] : 'containers';
 
-$success = '';
-$error = '';
+$success = isset($_GET['success']) ? $_GET['success'] : '';
+$error = isset($_GET['error']) ? $_GET['error'] : '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = isset($_POST['action']) ? $_POST['action'] : '';
@@ -149,6 +164,92 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($action === 'delete_image') {
+        Logger::log("POST delete_image: " . json_encode($_POST));
+
+        $config = require __DIR__ . '/../config.php';
+        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'ORC-';
+        $prefixLower = strtolower($prefix);
+        $imageName = trim(isset($_POST['image']) ? $_POST['image'] : '');
+
+        if ($imageName === '') {
+            $error = 'Image name is required.';
+        } else {
+            $repo = explode(':', $imageName);
+            $repo = $repo[0];
+            if (strpos(strtolower($repo), $prefixLower) !== 0) {
+                $error = 'Only application-created images can be removed.';
+            } else {
+                $output = Docker::removeImage($imageName);
+                if ($output === '' || strpos($output, 'Error') !== false || strpos($output, 'No such image') !== false) {
+                    $error = 'Failed to remove image: ' . htmlspecialchars($output);
+                } else {
+                    $mappings = Database::getAllImageMappings();
+                    foreach ($mappings as $m) {
+                        if (isset($m['image']) && $m['image'] === $imageName) {
+                            Database::deleteImageMapping($m['source_container'], $imageName);
+                        }
+                    }
+                    $success = 'Image "' . htmlspecialchars($imageName) . '" removed.';
+                }
+            }
+        }
+        header('Location: ?page=images');
+        exit;
+    }
+
+    if ($action === 'docker_stop') {
+        $name = trim(isset($_POST['name']) ? $_POST['name'] : '');
+        if ($name === '') {
+            $error = 'Container name is required.';
+        } else {
+            Docker::stop($name);
+            $success = 'Container "' . htmlspecialchars($name) . '" stopped.';
+        }
+        header('Location: ?page=docker');
+        exit;
+    }
+
+    if ($action === 'docker_start') {
+        $name = trim(isset($_POST['name']) ? $_POST['name'] : '');
+        if ($name === '') {
+            $error = 'Container name is required.';
+        } else {
+            Docker::start($name);
+            $success = 'Container "' . htmlspecialchars($name) . '" started.';
+        }
+        header('Location: ?page=docker');
+        exit;
+    }
+
+    if ($action === 'docker_rm') {
+        $name = trim(isset($_POST['name']) ? $_POST['name'] : '');
+        if ($name === '') {
+            $error = 'Container name is required.';
+        } else {
+            Docker::remove($name);
+            $success = 'Container "' . htmlspecialchars($name) . '" removed.';
+        }
+        header('Location: ?page=docker');
+        exit;
+    }
+
+    if ($action === 'docker_rmi') {
+        $imageName = trim(isset($_POST['image']) ? $_POST['image'] : '');
+        if ($imageName === '') {
+            $error = 'Image name is required.';
+        } else {
+            $output = Docker::removeImage($imageName);
+            if ($output === '' || strpos($output, 'Error') !== false || strpos($output, 'No such image') !== false) {
+                $error = 'Failed to remove image: ' . htmlspecialchars($output);
+            } else {
+                $success = 'Image "' . htmlspecialchars($imageName) . '" removed.';
+            }
+        }
+        header('Location: ?page=docker');
+        exit;
+    }
+
     if ($action === 'open_terminal') {
         $cloneId = isset($_POST['clone_id']) ? (int) $_POST['clone_id'] : 0;
         if ($cloneId) {
@@ -157,8 +258,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $escaped = escapeshellarg($clone['container_name']);
                 $session = 'orc-' . $clone['id'];
                 $detach = escapeshellarg($session);
+
+                $workdir = '';
+                $volumes = json_decode($clone['volumes_json'], true);
+                if ($volumes) {
+                    foreach ($volumes as $hostPath => $containerPath) {
+                        $workdir = $containerPath;
+                        $check = Docker::exec($clone['container_name'], "test -d " . escapeshellarg($containerPath . '/.git') . " && echo yes");
+                        if (trim($check) === 'yes') {
+                            break;
+                        }
+                    }
+                }
+
+                $execCmd = "docker exec -it";
+                if ($workdir !== '') {
+                    $execCmd .= " -w " . escapeshellarg($workdir);
+                }
+                $execCmd .= " $escaped bash";
+
                 exec("tmux kill-session -t $detach 2>/dev/null");
-                exec("tmux new-session -d -s $detach \"docker exec -it $escaped bash\" 2>&1");
+                exec("tmux new-session -d -s $detach \"$execCmd\" 2>&1");
                 exec("nohup gnome-terminal -- tmux attach -t $detach > /dev/null 2>&1 &");
             }
         }
@@ -190,6 +310,138 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         header('Location: ?page=clones');
         exit;
+    }
+
+    if ($action === 'resume_session') {
+        $sessionId = trim(isset($_POST['session_id']) ? $_POST['session_id'] : '');
+        $container = trim(isset($_POST['container']) ? $_POST['container'] : '');
+        $dir = trim(isset($_POST['directory']) ? $_POST['directory'] : '');
+        $tmuxSession = Opencode::activeTmuxSession();
+
+        if ($sessionId === '') {
+            orc_redirect('?page=sessions', 'Session id is required.');
+        }
+
+        if ($container !== '') {
+            if ($dir === '') {
+                $dir = '/';
+            }
+            $cbin = Opencode::resolveContainerBinary($container);
+            if ($cbin === '') {
+                orc_redirect('?page=sessions', 'opencode is not installed in container "' . $container . '".');
+            }
+            $inner = "docker exec -it -e TERM=screen-256color -e LANG=C.UTF-8 -w " . escapeshellarg($dir) . " " . escapeshellarg($container) . " " . escapeshellarg($cbin) . " --session " . escapeshellarg($sessionId) . "; exec bash";
+            if ($tmuxSession !== '') {
+                Opencode::tmuxNewWindow($tmuxSession, $inner);
+            } else {
+                exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
+            }
+            orc_redirect('?page=sessions', '', 'Opened session "' . substr($sessionId, 0, 12) . '" in container.');
+        } else {
+            $config = require __DIR__ . '/../config.php';
+            $bin = isset($config['opencodeBinary']) ? $config['opencodeBinary'] : 'opencode';
+            if ($dir === '') {
+                $dir = getenv('HOME');
+            }
+            $inner = "cd " . escapeshellarg($dir) . " && TERM=screen-256color " . escapeshellarg($bin) . " --session " . escapeshellarg($sessionId) . "; exec bash";
+            if ($tmuxSession !== '') {
+                Opencode::tmuxNewWindow($tmuxSession, $inner);
+            } else {
+                exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
+            }
+            orc_redirect('?page=sessions', '', 'Opened session "' . substr($sessionId, 0, 12) . '".');
+        }
+    }
+
+    if ($action === 'session_start_server') {
+        $container = trim(isset($_POST['container']) ? $_POST['container'] : '');
+        if ($container === '') {
+            orc_redirect('?page=sessions', 'Container name is required.');
+        } else {
+            $ok = Opencode::startServer($container);
+            if ($ok) {
+                orc_redirect('?page=sessions', '', 'Started opencode server in "' . $container . '".');
+            } else {
+                orc_redirect('?page=sessions', 'Could not start server: opencode not installed in "' . $container . '".');
+            }
+        }
+    }
+
+    if ($action === 'session_connect') {
+        $container = trim(isset($_POST['container']) ? $_POST['container'] : '');
+        $ip = trim(isset($_POST['ip']) ? $_POST['ip'] : '');
+        $port = (int) (isset($_POST['port']) ? $_POST['port'] : 0);
+        $config = require __DIR__ . '/../config.php';
+        $bin = isset($config['opencodeBinary']) ? $config['opencodeBinary'] : 'opencode';
+        $password = isset($config['opencodePassword']) ? $config['opencodePassword'] : '';
+        if ($container === '' || $ip === '' || $port <= 0) {
+            orc_redirect('?page=sessions', 'Container, IP and port are required.');
+        } else {
+            $auth = ($password !== '') ? ' -u opencode -p ' . escapeshellarg($password) : '';
+            $inner = "TERM=screen-256color " . escapeshellarg($bin) . " attach$auth http://$ip:$port; exec bash";
+            $tmuxSession = Opencode::activeTmuxSession();
+            if ($tmuxSession !== '') {
+                Opencode::tmuxNewWindow($tmuxSession, $inner);
+            } else {
+                exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
+            }
+            orc_redirect('?page=sessions', '', 'Connecting to "' . $container . '" at http://' . $ip . ':' . $port);
+        }
+    }
+
+    if ($action === 'session_open_web') {
+        $ip = trim(isset($_POST['ip']) ? $_POST['ip'] : '');
+        $port = (int) (isset($_POST['port']) ? $_POST['port'] : 0);
+        if ($ip === '' || $port <= 0) {
+            orc_redirect('?page=sessions', 'IP and port are required.');
+        } else {
+            exec("nohup xdg-open http://$ip:$port > /dev/null 2>&1 &");
+            orc_redirect('?page=sessions', '', 'Opened web UI at http://' . $ip . ':' . $port);
+        }
+    }
+
+    if ($action === 'delete_session') {
+        $sessionId = trim(isset($_POST['session_id']) ? $_POST['session_id'] : '');
+        $container = trim(isset($_POST['container']) ? $_POST['container'] : '');
+        if ($sessionId === '') {
+            orc_redirect('?page=sessions', 'Session id is required.');
+        } else {
+            $output = Opencode::deleteSession($sessionId, $container);
+            if ($output === '' || strpos($output, 'Error') !== false || strpos($output, 'not found') !== false || strpos($output, 'not installed') !== false) {
+                orc_redirect('?page=sessions', 'Failed to delete session: ' . $output);
+            } else {
+                orc_redirect('?page=sessions', '', 'Session "' . substr($sessionId, 0, 12) . '" deleted.');
+            }
+        }
+    }
+
+    if ($action === 'bulk_delete_sessions') {
+        $ids = isset($_POST['session_ids']) ? $_POST['session_ids'] : array();
+        $containers = isset($_POST['session_containers']) ? $_POST['session_containers'] : array();
+
+        if (empty($ids)) {
+            orc_redirect('?page=sessions', 'No sessions selected.');
+        }
+
+        $deleted = 0;
+        $errors = array();
+        foreach ($ids as $i => $id) {
+            $id = trim($id);
+            if ($id === '') continue;
+            $container = isset($containers[$i]) ? trim($containers[$i]) : '';
+            $output = Opencode::deleteSession($id, $container);
+            if ($output === '' || strpos($output, 'Error') !== false || strpos($output, 'not found') !== false || strpos($output, 'not installed') !== false) {
+                $errors[] = $id;
+            } else {
+                $deleted++;
+            }
+        }
+
+        if ($deleted > 0) {
+            orc_redirect('?page=sessions', $errors ? ('Deleted ' . $deleted . ' session(s), failed: ' . count($errors)) : '', 'Deleted ' . $deleted . ' session(s).');
+        } else {
+            orc_redirect('?page=sessions', 'Failed to delete sessions: ' . implode(', ', array_map(function ($e) { return substr($e, 0, 12); }, $errors)));
+        }
     }
 }
 
@@ -266,6 +518,14 @@ foreach ($clones as $key => $clone) {
     }
 }
 
+foreach ($clones as $clone) {
+    if (!empty($clone['source_container']) && !empty($clone['image'])) {
+        Database::saveImageMapping($clone['source_container'], $clone['image']);
+    }
+}
+
+$committedBySource = ContainerClone::committedImagesBySource();
+
 if ($basePage === 'logs') {
     header('Content-Type: text/plain');
     $cloneId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
@@ -281,6 +541,80 @@ if ($basePage === 'images') {
     $imageList = Docker::listImages();
 }
 
+$dockerContainers = array();
+$dockerImages = array();
+if ($basePage === 'docker') {
+    $dockerContainers = Docker::listAllContainers();
+    $dockerImages = Docker::listAllImages();
+}
+
+$sessions = array();
+$sessionsError = '';
+$opencodeContainers = array();
+
+if ($basePage === 'sessions') {
+    $sessions = Opencode::listSessions();
+    if ($sessions === false) {
+        $sessions = array();
+        $sessionsError = 'Failed to read opencode sessions. Make sure opencode is installed and the database is available.';
+    }
+
+    $seenIds = array();
+    foreach ($sessions as $s) {
+        if (!empty($s['id'])) {
+            $seenIds[$s['id']] = true;
+        }
+    }
+
+    $config = require __DIR__ . '/../config.php';
+    $serverPort = isset($config['opencodePort']) ? (int) $config['opencodePort'] : 4096;
+
+    foreach (Docker::listAllContainers() as $c) {
+        if (!$c['running']) continue;
+
+        $name = $c['name'];
+        $dbPath = Opencode::detectContainerDb($name);
+        $hasBin = Opencode::hasOpencode($name);
+        $ip = Docker::getIpAddress($name);
+
+        $info = array(
+            'name'         => $name,
+            'ip'           => $ip,
+            'port'         => $serverPort,
+            'has_db'       => ($dbPath !== ''),
+            'has_opencode' => $hasBin,
+            'server_up'    => ($ip !== '' && Opencode::portOpen($ip, $serverPort)),
+            'sessions'     => array(),
+        );
+
+        if ($dbPath !== '') {
+            $containerSessions = Opencode::listContainerSessions($name, $dbPath);
+            if (is_array($containerSessions)) {
+                $uniqueContainer = array();
+                foreach ($containerSessions as $cs) {
+                    if (!empty($cs['id']) && isset($seenIds[$cs['id']])) {
+                        continue;
+                    }
+                    if (!empty($cs['id'])) {
+                        $seenIds[$cs['id']] = true;
+                    }
+                    $uniqueContainer[] = $cs;
+                    $cs['source'] = 'Container: ' . $name;
+                    $cs['container'] = $name;
+                    $sessions[] = $cs;
+                }
+                $info['sessions'] = $uniqueContainer;
+            }
+        }
+
+        $opencodeContainers[] = $info;
+    }
+
+    usort($sessions, function ($a, $b) {
+        return $b['updated_ts'] - $a['updated_ts'];
+    });
+}
+
 ob_start();
 switch ($basePage) {
     case 'containers':
@@ -291,6 +625,12 @@ switch ($basePage) {
         break;
     case 'clones':
         require __DIR__ . '/../templates/clones.php';
+        break;
+    case 'docker':
+        require __DIR__ . '/../templates/docker.php';
+        break;
+    case 'sessions':
+        require __DIR__ . '/../templates/sessions.php';
         break;
     default:
         header('Location: ?page=containers');

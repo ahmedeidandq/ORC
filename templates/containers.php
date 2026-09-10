@@ -13,6 +13,7 @@
                 <tr>
                     <th>Container</th>
                     <th>Image</th>
+                    <th>Committed</th>
                     <th>Size</th>
                     <th>Status</th>
                     <th>Actions</th>
@@ -20,9 +21,20 @@
             </thead>
             <tbody>
                 <?php foreach ($containerList as $c): ?>
+                    <?php $committedTags = isset($committedBySource[$c['name']]) ? $committedBySource[$c['name']] : array(); ?>
                     <tr>
                         <td><strong><?= htmlspecialchars($c['name']) ?></strong></td>
                         <td><code><?= htmlspecialchars($c['image']) ?></code></td>
+                        <td>
+                            <?php if (!empty($committedTags)): ?>
+                                <code><?= htmlspecialchars($committedTags[0]) ?></code>
+                                <?php if (count($committedTags) > 1): ?>
+                                    <span class="badge badge-blue">+<?= count($committedTags) - 1 ?></span>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <span style="color: var(--muted);">-</span>
+                            <?php endif; ?>
+                        </td>
                         <td><code><?= htmlspecialchars($c['size'] ?? '') ?></code></td>
                         <td><?= htmlspecialchars($c['status']) ?></td>
                         <td>
@@ -43,14 +55,24 @@
                         </td>
                     </tr>
                     <tr id="clone-form-<?= htmlspecialchars($c['name']) ?>" style="display: none;">
-                        <td colspan="5">
+                        <td colspan="6">
                             <form method="POST" action="?page=containers" style="background: var(--card-bg); padding: 1rem; border-radius: 0.5rem;">
                                 <input type="hidden" name="action" value="create_clone">
                                 <input type="hidden" name="container" value="<?= htmlspecialchars($c['name']) ?>">
 
                                 <div class="form-group" style="display: inline-block; width: 220px; margin-right: 1rem; margin-bottom: 1rem;">
                                     <label>Clone Name</label>
-                                    <input type="text" name="name" class="form-control" placeholder="e.g. task-1" required>
+                                    <input type="text" name="name" class="form-control" placeholder="e.g. task-1" required
+                                           pattern="[a-zA-Z0-9_.-]+" title="Lowercase letters, digits, -, _ and . only">
+                                </div>
+
+                                <div style="display: inline-block; margin-bottom: 1rem; vertical-align: top;">
+                                    <label style="font-size: 0.75rem; color: var(--muted); display: block; margin-bottom: 0.375rem;">Committed image</label>
+                                    <?php if (!empty($committedTags)): ?>
+                                        <span class="badge badge-green">Reuse <?= htmlspecialchars($committedTags[0]) ?></span>
+                                    <?php else: ?>
+                                        <span class="badge badge-yellow">Will commit fresh</span>
+                                    <?php endif; ?>
                                 </div>
 
                                 <div style="margin-bottom: 0.75rem;">

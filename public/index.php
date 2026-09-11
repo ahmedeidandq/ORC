@@ -336,10 +336,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
             }
+            Opencode::focusTerminal();
             orc_redirect('?page=sessions', '', 'Opened session "' . substr($sessionId, 0, 12) . '" in container.');
         } else {
-            $config = require __DIR__ . '/../config.php';
-            $bin = isset($config['opencodeBinary']) ? $config['opencodeBinary'] : 'opencode';
+            $bin = Opencode::resolveHostBinary();
+            if ($bin === '') {
+                orc_redirect('?page=sessions', 'opencode binary not found on host.');
+            }
             if ($dir === '') {
                 $dir = getenv('HOME');
             }
@@ -349,6 +352,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
             }
+            Opencode::focusTerminal();
             orc_redirect('?page=sessions', '', 'Opened session "' . substr($sessionId, 0, 12) . '".');
         }
     }
@@ -371,8 +375,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $container = trim(isset($_POST['container']) ? $_POST['container'] : '');
         $ip = trim(isset($_POST['ip']) ? $_POST['ip'] : '');
         $port = (int) (isset($_POST['port']) ? $_POST['port'] : 0);
+        $bin = Opencode::resolveHostBinary();
         $config = require __DIR__ . '/../config.php';
-        $bin = isset($config['opencodeBinary']) ? $config['opencodeBinary'] : 'opencode';
         $password = isset($config['opencodePassword']) ? $config['opencodePassword'] : '';
         if ($container === '' || $ip === '' || $port <= 0) {
             orc_redirect('?page=sessions', 'Container, IP and port are required.');
@@ -556,7 +560,6 @@ if ($basePage === 'sessions') {
     $sessions = Opencode::listSessions();
     if ($sessions === false) {
         $sessions = array();
-        $sessionsError = 'Failed to read opencode sessions. Make sure opencode is installed and the database is available.';
     }
 
     $seenIds = array();
@@ -608,6 +611,10 @@ if ($basePage === 'sessions') {
         }
 
         $opencodeContainers[] = $info;
+    }
+
+    if (empty($sessions) && $sessionsError === '') {
+        $sessionsError = 'No opencode sessions found. Make sure opencode is installed in a container.';
     }
 
     usort($sessions, function ($a, $b) {

@@ -2,14 +2,79 @@
 
 class Opencode
 {
-    public static function dbQuery($sql)
+    private static $resolvedBin = null;
+
+    public static function resolveHostBinary()
     {
+        if (self::$resolvedBin !== null) {
+            return self::$resolvedBin;
+        }
+
         $config = require __DIR__ . '/../config.php';
         $bin = isset($config['opencodeBinary']) ? $config['opencodeBinary'] : 'opencode';
 
-        $cmd = $bin . ' db ' . escapeshellarg($sql) . ' --format json 2>&1';
-        $output = shell_exec($cmd);
-        if ($output === null || trim($output) === '') {
+        if ($bin !== '' && $bin[0] === '/') {
+            self::$resolvedBin = (is_executable($bin)) ? $bin : '';
+            return self::$resolvedBin;
+        }
+
+        $path = getenv('PATH');
+        $dirs = explode(':', $path);
+        foreach ($dirs as $dir) {
+            $full = rtrim($dir, '/') . '/' . $bin;
+            if (is_executable($full)) {
+                self::$resolvedBin = $full;
+                return self::$resolvedBin;
+            }
+        }
+
+        $common = array(
+            '/home/' . get_current_user() . '/.opencode/bin/opencode',
+            '/root/.opencode/bin/opencode',
+            '/root/.local/share/opencode/bin/opencode',
+            '/usr/local/bin/opencode',
+            '/usr/bin/opencode',
+        );
+        foreach ($common as $path) {
+            if (is_executable($path)) {
+                self::$resolvedBin = $path;
+                return self::$resolvedBin;
+            }
+        }
+
+        $out = trim(shell_exec("which opencode 2>/dev/null"));
+        if ($out !== '' && is_executable($out)) {
+            self::$resolvedBin = $out;
+            return self::$resolvedBin;
+        }
+
+        self::$resolvedBin = '';
+        return self::$resolvedBin;
+    }
+
+    public static function dbQuery($sql)
+    {
+        $bin = self::resolveHostBinary();
+        if ($bin === '') {
+            return false;
+        }
+
+        $tmp = tempnam(sys_get_temp_dir(), 'orc_db_');
+        if ($tmp === false) {
+            return false;
+        }
+
+        $cmd = escapeshellarg($bin) . ' db ' . escapeshellarg($sql) . ' --format json > ' . escapeshellarg($tmp) . ' 2>&1';
+        $exitCode = 0;
+        $line = shell_exec($cmd);
+        if ($line === null) {
+            $exitCode = 1;
+        }
+
+        $output = @file_get_contents($tmp);
+        @unlink($tmp);
+
+        if ($output === false || trim($output) === '') {
             return false;
         }
 
@@ -182,6 +247,29 @@ class Opencode
         }
         exec("tmux new-window -t " . escapeshellarg($session . ':') . " " . escapeshellarg($command) . " 2>&1");
         return true;
+    }
+
+    public static function focusTerminal()
+    {
+        $out = trim(shell_exec("xdotool search --class gnome-terminal 2>/dev/null"));
+        if ($out === '') {
+            return false;
+        }
+        $ids = array_values(array_filter(array_map('trim', explode("\n", $out)), 'strlen'));
+        foreach ($ids as $id) {
+            $geo = trim(shell_exec("xdotool getwindowgeometry " . escapeshellarg($id) . " 2>/dev/null"));
+            if (preg_match('/Geometry:\s*(\d+)x(\d+)/', $geo, $m)) {
+                if ((int) $m[1] > 100 && (int) $m[2] > 50) {
+                    exec("xdotool windowactivate " . escapeshellarg($id) . " 2>&1");
+                    return true;
+                }
+            }
+        }
+        if (!empty($ids)) {
+            exec("xdotool windowactivate " . escapeshellarg($ids[0]) . " 2>&1");
+            return true;
+        }
+        return false;
     }
 
     public static function deleteSession($id, $container = '')

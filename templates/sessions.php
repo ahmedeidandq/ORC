@@ -70,15 +70,7 @@
                                                 Connect
                                             </button>
                                         </form>
-                                        <form method="POST" style="display: inline;">
-                                            <input type="hidden" name="action" value="session_open_web">
-                                            <input type="hidden" name="ip" value="<?= htmlspecialchars($oc['ip']) ?>">
-                                            <input type="hidden" name="port" value="<?= $oc['port'] ?>">
-                                            <button type="submit" class="btn btn-ghost btn-sm" title="Open web UI">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-                                                Web
-                                            </button>
-                                        </form>
+
                                     <?php endif; ?>
                                 <?php else: ?>
                                     <span style="color: var(--muted); font-size: 0.75rem;">opencode not installed inside</span>

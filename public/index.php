@@ -357,6 +357,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+
     if ($action === 'session_start_server') {
         $container = trim(isset($_POST['container']) ? $_POST['container'] : '');
         if ($container === '') {
@@ -390,17 +391,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
             }
             orc_redirect('?page=sessions', '', 'Connecting to "' . $container . '" at http://' . $ip . ':' . $port);
-        }
-    }
-
-    if ($action === 'session_open_web') {
-        $ip = trim(isset($_POST['ip']) ? $_POST['ip'] : '');
-        $port = (int) (isset($_POST['port']) ? $_POST['port'] : 0);
-        if ($ip === '' || $port <= 0) {
-            orc_redirect('?page=sessions', 'IP and port are required.');
-        } else {
-            exec("nohup xdg-open http://$ip:$port > /dev/null 2>&1 &");
-            orc_redirect('?page=sessions', '', 'Opened web UI at http://' . $ip . ':' . $port);
         }
     }
 
@@ -520,6 +510,36 @@ foreach ($clones as $key => $clone) {
     if (!$clones[$key]['branches']) {
         $clones[$key]['branches'] = array();
     }
+
+    if ($clones[$key]['status'] === 'running') {
+        if (!empty($clones[$key]['branches'])) {
+            foreach ($clones[$key]['branches'] as $path => &$branchInfo) {
+                $check = Docker::exec($clone['container_name'], "test -d " . escapeshellarg($path . '/.git') . " && echo yes");
+                if (trim($check) === 'yes') {
+                    $output = Docker::exec($clone['container_name'], "cd " . escapeshellarg($path) . " && git branch --show-current 2>/dev/null");
+                    $current = trim($output);
+                    if ($current !== '') {
+                        $branchInfo['branch'] = $current;
+                    }
+                }
+            }
+            unset($branchInfo);
+        } else {
+            foreach ($clones[$key]['volumes'] as $hostPath => $containerPath) {
+                $check = Docker::exec($clone['container_name'], "test -d " . escapeshellarg($containerPath . '/.git') . " && echo yes");
+                if (trim($check) === 'yes') {
+                    $output = Docker::exec($clone['container_name'], "cd " . escapeshellarg($containerPath) . " && git branch --show-current 2>/dev/null");
+                    $current = trim($output);
+                    if ($current !== '') {
+                        $clones[$key]['branches'][$containerPath] = array(
+                            'branch'      => $current,
+                            'base_branch' => '',
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 foreach ($clones as $clone) {
@@ -611,6 +631,11 @@ if ($basePage === 'sessions') {
         }
 
         $opencodeContainers[] = $info;
+    }
+
+    $containerIps = array();
+    foreach ($opencodeContainers as $oc) {
+        $containerIps[$oc['name']] = $oc['ip'];
     }
 
     if (empty($sessions) && $sessionsError === '') {

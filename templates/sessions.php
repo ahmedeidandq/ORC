@@ -150,6 +150,11 @@
                             <?php else: ?>
                                 <span class="badge badge-green">Active</span>
                             <?php endif; ?>
+                            <?php if (!empty($s['is_active'])): ?>
+                                <span class="badge badge-blue">Running</span>
+                            <?php else: ?>
+                                <span class="badge" style="background: var(--muted-bg, #e5e7eb); color: var(--muted-fg, #6b7280);">Idle</span>
+                            <?php endif; ?>
                         </td>
                         <td>
                             <div class="actions" style="flex-wrap: nowrap;">
@@ -186,6 +191,30 @@
                 <?php endforeach; ?>
             </tbody>
         </table>
+        <?php if ($sessionPages > 1): ?>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border, #e5e7eb);">
+            <span style="color: var(--muted); font-size: 0.8rem;">
+                Page <?= $sessionPage ?> of <?= $sessionPages ?> (<?= $sessionTotal ?> sessions)
+            </span>
+            <div style="display: flex; gap: 0.25rem;">
+                <?php if ($sessionPage > 1): ?>
+                    <a href="?page=sessions&sp=1" class="btn btn-ghost btn-sm" title="First">&laquo;</a>
+                    <a href="?page=sessions&sp=<?= $sessionPage - 1 ?>" class="btn btn-ghost btn-sm" title="Previous">&lsaquo;</a>
+                <?php endif; ?>
+                <?php
+                $start = max(1, $sessionPage - 2);
+                $end = min($sessionPages, $sessionPage + 2);
+                for ($p = $start; $p <= $end; $p++):
+                ?>
+                    <a href="?page=sessions&sp=<?= $p ?>" class="btn btn-sm <?= $p === $sessionPage ? 'btn-primary' : 'btn-ghost' ?>"><?= $p ?></a>
+                <?php endfor; ?>
+                <?php if ($sessionPage < $sessionPages): ?>
+                    <a href="?page=sessions&sp=<?= $sessionPage + 1 ?>" class="btn btn-ghost btn-sm" title="Next">&rsaquo;</a>
+                    <a href="?page=sessions&sp=<?= $sessionPages ?>" class="btn btn-ghost btn-sm" title="Last">&raquo;</a>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 <?php endif; ?>
 

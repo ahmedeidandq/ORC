@@ -293,6 +293,57 @@ class Opencode
         return $output;
     }
 
+    public static function getActiveStatuses($sessions)
+    {
+        if (empty($sessions)) {
+            return array();
+        }
+
+        $ids = array();
+        foreach ($sessions as $r) {
+            if (isset($r['id'])) {
+                $ids[] = $r['id'];
+            }
+        }
+        if (empty($ids)) {
+            return array();
+        }
+
+        $idList = "'" . implode("','", array_map(function ($id) {
+            return str_replace("'", "''", $id);
+        }, $ids)) . "'";
+
+        $rows = self::dbQuery(
+            "SELECT session_id, json_extract(data, '$.role') AS role, json_extract(data, '$.time.completed') AS completed FROM message "
+            . "WHERE rowid IN (SELECT MAX(rowid) FROM message WHERE session_id IN ($idList) GROUP BY session_id)"
+        );
+
+        $map = array();
+        if (is_array($rows)) {
+            foreach ($rows as $r) {
+                $role = isset($r['role']) ? $r['role'] : '';
+                $completed = isset($r['completed']) ? $r['completed'] : null;
+                $map[$r['session_id']] = ($role === 'user') || ($role === 'assistant' && $completed === null);
+            }
+        }
+        return $map;
+    }
+
+    private static function getContainerActiveStatuses($container, $dbPath)
+    {
+        $dbPath = str_replace("'", "\\'", $dbPath);
+        $script = "import sqlite3, json\n"
+            . "con = sqlite3.connect('file:" . $dbPath . "?mode=ro', uri=True)\n"
+            . "cur = con.execute(\"SELECT session_id, json_extract(data, '$.role') AS role, json_extract(data, '$.time.completed') AS completed FROM message WHERE rowid IN (SELECT MAX(rowid) FROM message GROUP BY session_id)\")\n"
+            . "out = {r[0]: (r[1] == 'user' or (r[1] == 'assistant' and r[2] is None)) for r in cur.fetchall()}\n"
+            . "print(json.dumps(out))";
+
+        $cmd = "docker exec " . escapeshellarg($container) . " python3 -c " . escapeshellarg($script) . " 2>&1";
+        $output = trim(shell_exec($cmd));
+        $data = json_decode($output, true);
+        return is_array($data) ? $data : array();
+    }
+
     private static function normalizeRow($r)
     {
         if (!is_array($r) || !isset($r['id'])) {

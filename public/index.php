@@ -645,6 +645,20 @@ if ($basePage === 'sessions') {
     usort($sessions, function ($a, $b) {
         return $b['updated_ts'] - $a['updated_ts'];
     });
+
+    $sessionTotal = count($sessions);
+    $sessionPerPage = 10;
+    $sessionPage = isset($_GET['sp']) ? max(1, (int) $_GET['sp']) : 1;
+    $sessionPages = max(1, (int) ceil($sessionTotal / $sessionPerPage));
+    if ($sessionPage > $sessionPages) $sessionPage = $sessionPages;
+    $sessionOffset = ($sessionPage - 1) * $sessionPerPage;
+    $sessions = array_slice($sessions, $sessionOffset, $sessionPerPage);
+
+    $activeMap = Opencode::getActiveStatuses($sessions);
+    foreach ($sessions as &$s) {
+        $s['is_active'] = isset($activeMap[$s['id']]) && $activeMap[$s['id']];
+    }
+    unset($s);
 }
 
 ob_start();

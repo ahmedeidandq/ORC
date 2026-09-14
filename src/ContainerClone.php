@@ -18,15 +18,8 @@ class ContainerClone
 
         $imageName = strtolower($config['containerPrefix']) . $cleanName . ':' . date('YmdHis');
 
-        $resolved = self::resolveCommittedImage($sourceContainer, $cleanName);
-        if ($resolved) {
-            $imageName = $resolved;
-            Logger::log("REUSE IMAGE: $imageName");
-        } else {
-            Logger::log("COMMIT: $sourceContainer -> $imageName");
-            Docker::commit($sourceContainer, $imageName);
-            Database::saveImageMapping($sourceContainer, $imageName);
-        }
+        Logger::log("COMMIT: $sourceContainer -> $imageName");
+        Docker::commit($sourceContainer, $imageName);
 
         $volumeMappings = array();
 
@@ -122,57 +115,6 @@ class ContainerClone
         return $clone;
     }
 
-    public static function createFromImage($name, $imageName, array $volumeMappings = array())
-    {
-        $config = require __DIR__ . '/../config.php';
-
-        Logger::log("CREATE FROM IMAGE: name=$name, image=$imageName, volumes=" . json_encode($volumeMappings));
-
-        $containerName = $config['containerPrefix'] . strtolower($name);
-
-        $imageInfo = Docker::inspectImage($imageName);
-        $baseImage = $imageInfo ? (isset($imageInfo['Config']['Image']) ? $imageInfo['Config']['Image'] : '') : $imageName;
-
-        $runCmd = array();
-        $entrypoint = '';
-        if (preg_match('/apache/', $baseImage)) {
-            $runCmd = array('apache2-foreground');
-        } elseif (preg_match('/nginx/', $baseImage)) {
-            $runCmd = array('nginx', '-g', 'daemon off;');
-        } elseif (preg_match('/mysql|mariadb/', $baseImage)) {
-            $runCmd = array('mysqld');
-        } elseif (preg_match('/postgres/', $baseImage)) {
-            $runCmd = array('postgres');
-        } elseif (preg_match('/redis/', $baseImage)) {
-            $runCmd = array('redis-server');
-        } elseif (preg_match('/node/', $baseImage)) {
-            $entrypoint = '/bin/sh';
-            $runCmd = array('-c', 'while true; do sleep 1000; done');
-        } else {
-            $entrypoint = '/bin/sh';
-            $runCmd = array('-c', 'while true; do sleep 1000; done');
-        }
-
-        Logger::log("FROM IMAGE: baseImage=$baseImage, entrypoint=$entrypoint, runCmd=" . json_encode($runCmd));
-        $containerId = Docker::run($containerName, $imageName, $volumeMappings, array(), $entrypoint, $runCmd);
-
-        $clone = array(
-            'id'               => Database::nextCloneId(),
-            'name'             => $name,
-            'source_container' => $imageName,
-            'container_id'     => $containerId,
-            'container_name'   => $containerName,
-            'image'            => $imageName,
-            'volumes_json'     => json_encode($volumeMappings),
-            'branches_json'    => json_encode(array()),
-            'status'           => $containerId ? 'running' : 'not_found',
-            'created_at'       => date('Y-m-d H:i:s'),
-        );
-
-        Database::saveClone($clone);
-        return $clone;
-    }
-
     public static function get($id)
     {
         return Database::getClone($id);
@@ -219,6 +161,10 @@ class ContainerClone
         $volumeMappings = json_decode($clone['volumes_json'], true);
         if ($volumeMappings) {
             foreach ($volumeMappings as $hostPath => $containerPath) {
+                if (strpos($hostPath, '/tmp/') !== 0 && $hostPath !== '/tmp') {
+                    Logger::log("BLOCKED: Refusing to delete path outside /tmp: $hostPath");
+                    continue;
+                }
                 if (is_dir($hostPath)) {
                     self::removeDir($hostPath);
                 } elseif (is_file($hostPath)) {
@@ -264,6 +210,10 @@ class ContainerClone
 
     private static function removeDir($dir)
     {
+        if (strpos($dir, '/tmp/') !== 0 && $dir !== '/tmp') {
+            Logger::log("BLOCKED: Refusing to removeDir outside /tmp: $dir");
+            return;
+        }
         if (!is_dir($dir)) return;
         $files = array_diff(scandir($dir), array('.', '..'));
         foreach ($files as $file) {
@@ -284,73 +234,5 @@ class ContainerClone
         $name = preg_replace('/-+/', '-', $name);
         $name = trim($name, '.-');
         return $name;
-    }
-
-    public static function resolveCommittedImage($sourceContainer, $cleanName = '')
-    {
-        $config = require __DIR__ . '/../config.php';
-        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'ORC-';
-        $prefixLower = strtolower($prefix);
-
-        $candidates = array();
-
-        $mappings = Database::getImageMappingsBySource($sourceContainer);
-        foreach ($mappings as $m) {
-            if (!empty($m['image'])) {
-                $candidates[] = $m['image'];
-            }
-        }
-
-        if ($cleanName !== '') {
-            foreach (Docker::listImages() as $img) {
-                $repoTag = $img['repo'] . ':' . $img['tag'];
-                if ($img['repo'] === $prefixLower . $cleanName) {
-                    $candidates[] = $repoTag;
-                }
-            }
-        }
-
-        $candidates = array_values(array_unique($candidates));
-        usort($candidates, function ($a, $b) {
-            return strcmp($b, $a);
-        });
-
-        foreach ($candidates as $tag) {
-            if (Docker::imageExists($tag)) {
-                return $tag;
-            }
-            Database::deleteImageMapping($sourceContainer, $tag);
-        }
-
-        return null;
-    }
-
-    public static function committedImagesBySource()
-    {
-        $result = array();
-        $mappings = Database::getAllImageMappings();
-        foreach ($mappings as $m) {
-            $source = isset($m['source_container']) ? $m['source_container'] : '';
-            $image = isset($m['image']) ? $m['image'] : '';
-            if ($source === '' || $image === '' || !Docker::imageExists($image)) {
-                if ($image !== '') {
-                    Database::deleteImageMapping($source, $image);
-                }
-                continue;
-            }
-            if (!isset($result[$source])) {
-                $result[$source] = array();
-            }
-            $result[$source][] = $image;
-        }
-
-        foreach ($result as $source => &$tags) {
-            usort($tags, function ($a, $b) {
-                return strcmp($b, $a);
-            });
-        }
-        unset($tags);
-
-        return $result;
     }
 }

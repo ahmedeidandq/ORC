@@ -161,7 +161,6 @@
         <nav>
             <a href="?page=docker" class="<?= ($basePage ?? '') === 'docker' ? 'active' : '' ?>">Docker</a>
             <a href="?page=containers" class="<?= ($basePage ?? '') === 'containers' ? 'active' : '' ?>">Containers</a>
-            <a href="?page=images" class="<?= ($basePage ?? '') === 'images' ? 'active' : '' ?>">Images</a>
             <a href="?page=clones" class="<?= ($basePage ?? '') === 'clones' ? 'active' : '' ?>">Clones</a>
             <a href="?page=sessions" class="<?= ($basePage ?? '') === 'sessions' ? 'active' : '' ?>">Sessions</a>
             <button type="button" class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">

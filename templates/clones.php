@@ -14,6 +14,7 @@
                     <th>Name</th>
                     <th>From</th>
                     <th>Status</th>
+                    <th>Session</th>
                     <th>IP</th>
                     <th>Branches</th>
                     <th>Volumes</th>
@@ -37,6 +38,62 @@
                             </span>
                         </td>
                         <td>
+                            <?php if ($clone['status'] === 'running'): ?>
+                                <?php if (!empty($clone['active_session'])): ?>
+                                    <?php $ses = $clone['active_session']; ?>
+                                    <strong title="<?= htmlspecialchars($ses['id']) ?>" style="font-size: 0.8rem;"><?= htmlspecialchars(strlen($ses['title']) > 30 ? substr($ses['title'], 0, 30) . '...' : $ses['title']) ?></strong>
+                                    <br>
+                                    <?php if (!empty($ses['is_active'])): ?>
+                                        <span class="badge badge-blue">Running</span>
+                                    <?php else: ?>
+                                        <span class="badge" style="background: var(--badge-blue-bg); color: var(--badge-blue-fg); opacity: 0.6;">Idle</span>
+                                    <?php endif; ?>
+                                    <form method="POST" style="display: inline; margin-top: 0.25rem;">
+                                        <input type="hidden" name="action" value="resume_session">
+                                        <input type="hidden" name="session_id" value="<?= htmlspecialchars($ses['id']) ?>">
+                                        <input type="hidden" name="container" value="<?= htmlspecialchars($clone['container_name']) ?>">
+                                        <input type="hidden" name="directory" value="<?= htmlspecialchars($ses['directory']) ?>">
+                                        <input type="hidden" name="redirect" value="?page=clones">
+                                        <button type="submit" class="btn btn-primary btn-sm" title="Resume session" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                                            Resume
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
+                                <div style="margin-top: 0.3rem; display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap;">
+                                    <form method="POST" style="display: inline;">
+                                        <input type="hidden" name="action" value="start_session">
+                                        <input type="hidden" name="clone_id" value="<?= $clone['id'] ?>">
+                                        <input type="hidden" name="redirect" value="?page=clones">
+                                        <button type="submit" class="btn btn-ghost btn-sm" title="Start new opencode session" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                                            New
+                                        </button>
+                                    </form>
+                                    <form method="POST" style="display: inline; display: flex; gap: 0.2rem; align-items: center;">
+                                        <input type="hidden" name="action" value="set_session">
+                                        <input type="hidden" name="clone_id" value="<?= $clone['id'] ?>">
+                                        <input type="hidden" name="redirect" value="?page=clones">
+                                        <select name="session_id" class="form-control"
+                                                style="width: 140px; font-size: 0.7rem; padding: 0.2rem 0.4rem;" required>
+                                            <option value="">Select session...</option>
+                                            <?php foreach ($clone['container_sessions'] as $cs): ?>
+                                                <option value="<?= htmlspecialchars($cs['id']) ?>" title="<?= htmlspecialchars($cs['id']) ?>">
+                                                    <?= htmlspecialchars(strlen($cs['title']) > 20 ? substr($cs['title'], 0, 20) . '...' : $cs['title']) ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <button type="submit" class="btn btn-ghost btn-sm" title="Set and resume session" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                                            Set
+                                        </button>
+                                    </form>
+                                </div>
+                            <?php else: ?>
+                                <span style="color: var(--muted);">-</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
                             <?php if (!empty($clone['ip'])): ?>
                                 <code><?= htmlspecialchars($clone['ip']) ?></code>
                             <?php else: ?>
@@ -47,7 +104,6 @@
                             <?php if (!empty($clone['branches'])): ?>
                                 <?php foreach ($clone['branches'] as $path => $info): ?>
                                     <span class="badge badge-blue"><?= htmlspecialchars($info['branch']) ?></span>
-                                    <span class="badge badge-green">from <?= htmlspecialchars($info['base_branch']) ?></span>
                                     <br>
                                 <?php endforeach; ?>
                             <?php else: ?>

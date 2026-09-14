@@ -130,74 +130,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    if ($action === 'create_from_image') {
-        Logger::log("POST create_from_image: " . json_encode($_POST));
-
-        $name = trim(isset($_POST['name']) ? $_POST['name'] : '');
-        $imageName = trim(isset($_POST['image']) ? $_POST['image'] : '');
-        $hostPaths = isset($_POST['host_path']) ? $_POST['host_path'] : array();
-        $containerPaths = isset($_POST['container_path']) ? $_POST['container_path'] : array();
-
-        if ($name === '') {
-            $error = 'Container name is required.';
-        } elseif ($imageName === '') {
-            $error = 'Image name is required.';
-        } else {
-            $volumeMappings = array();
-            $count = count($hostPaths);
-            for ($i = 0; $i < $count; $i++) {
-                $hp = trim($hostPaths[$i]);
-                $cp = trim($containerPaths[$i]);
-                if ($hp !== '' && $cp !== '') {
-                    $volumeMappings[$hp] = $cp;
-                }
-            }
-
-            try {
-                ContainerClone::createFromImage($name, $imageName, $volumeMappings);
-                $success = 'Container "' . htmlspecialchars($name) . '" created from image.';
-            } catch (Exception $e) {
-                $error = 'Failed to create container: ' . $e->getMessage();
-            }
-            header('Location: ?page=clones');
-            exit;
-        }
-    }
-
-    if ($action === 'delete_image') {
-        Logger::log("POST delete_image: " . json_encode($_POST));
-
-        $config = require __DIR__ . '/../config.php';
-        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'ORC-';
-        $prefixLower = strtolower($prefix);
-        $imageName = trim(isset($_POST['image']) ? $_POST['image'] : '');
-
-        if ($imageName === '') {
-            $error = 'Image name is required.';
-        } else {
-            $repo = explode(':', $imageName);
-            $repo = $repo[0];
-            if (strpos(strtolower($repo), $prefixLower) !== 0) {
-                $error = 'Only application-created images can be removed.';
-            } else {
-                $output = Docker::removeImage($imageName);
-                if ($output === '' || strpos($output, 'Error') !== false || strpos($output, 'No such image') !== false) {
-                    $error = 'Failed to remove image: ' . htmlspecialchars($output);
-                } else {
-                    $mappings = Database::getAllImageMappings();
-                    foreach ($mappings as $m) {
-                        if (isset($m['image']) && $m['image'] === $imageName) {
-                            Database::deleteImageMapping($m['source_container'], $imageName);
-                        }
-                    }
-                    $success = 'Image "' . htmlspecialchars($imageName) . '" removed.';
-                }
-            }
-        }
-        header('Location: ?page=images');
-        exit;
-    }
-
     if ($action === 'docker_stop') {
         $name = trim(isset($_POST['name']) ? $_POST['name'] : '');
         if ($name === '') {
@@ -316,10 +248,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sessionId = trim(isset($_POST['session_id']) ? $_POST['session_id'] : '');
         $container = trim(isset($_POST['container']) ? $_POST['container'] : '');
         $dir = trim(isset($_POST['directory']) ? $_POST['directory'] : '');
+        $redirect = trim(isset($_POST['redirect']) ? $_POST['redirect'] : '?page=sessions');
         $tmuxSession = Opencode::activeTmuxSession();
 
         if ($sessionId === '') {
-            orc_redirect('?page=sessions', 'Session id is required.');
+            orc_redirect($redirect, 'Session id is required.');
         }
 
         if ($container !== '') {
@@ -328,7 +261,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $cbin = Opencode::resolveContainerBinary($container);
             if ($cbin === '') {
-                orc_redirect('?page=sessions', 'opencode is not installed in container "' . $container . '".');
+                orc_redirect($redirect, 'opencode is not installed in container "' . $container . '".');
             }
             $inner = "docker exec -it -e TERM=screen-256color -e LANG=C.UTF-8 -w " . escapeshellarg($dir) . " " . escapeshellarg($container) . " " . escapeshellarg($cbin) . " --session " . escapeshellarg($sessionId) . "; exec bash";
             if ($tmuxSession !== '') {
@@ -337,11 +270,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
             }
             Opencode::focusTerminal();
-            orc_redirect('?page=sessions', '', 'Opened session "' . substr($sessionId, 0, 12) . '" in container.');
+            orc_redirect($redirect, '', 'Opened session "' . substr($sessionId, 0, 12) . '" in container.');
         } else {
             $bin = Opencode::resolveHostBinary();
             if ($bin === '') {
-                orc_redirect('?page=sessions', 'opencode binary not found on host.');
+                orc_redirect($redirect, 'opencode binary not found on host.');
             }
             if ($dir === '') {
                 $dir = getenv('HOME');
@@ -353,10 +286,102 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
             }
             Opencode::focusTerminal();
-            orc_redirect('?page=sessions', '', 'Opened session "' . substr($sessionId, 0, 12) . '".');
+            orc_redirect($redirect, '', 'Opened session "' . substr($sessionId, 0, 12) . '".');
         }
     }
 
+
+    if ($action === 'start_session') {
+        $cloneId = isset($_POST['clone_id']) ? (int) $_POST['clone_id'] : 0;
+        $redirect = trim(isset($_POST['redirect']) ? $_POST['redirect'] : '?page=clones');
+        $tmuxSession = Opencode::activeTmuxSession();
+
+        if (!$cloneId) {
+            orc_redirect($redirect, 'Clone id is required.');
+        }
+
+        $clone = ContainerClone::get($cloneId);
+        if (!$clone) {
+            orc_redirect($redirect, 'Clone not found.');
+        }
+
+        $container = $clone['container_name'];
+        $status = Docker::getStatus($container);
+        if ($status !== 'running') {
+            orc_redirect($redirect, 'Clone container is not running.');
+        }
+
+        $cbin = Opencode::resolveContainerBinary($container);
+        if ($cbin === '') {
+            orc_redirect($redirect, 'opencode is not installed in container "' . $container . '".');
+        }
+
+        $dir = '/';
+        $volumes = json_decode($clone['volumes_json'], true);
+        if ($volumes) {
+            foreach ($volumes as $containerPath => $hp) {
+                $dir = $containerPath;
+                break;
+            }
+        }
+
+        $inner = "docker exec -it -e TERM=screen-256color -e LANG=C.UTF-8 -w " . escapeshellarg($dir) . " " . escapeshellarg($container) . " " . escapeshellarg($cbin) . "; exec bash";
+        if ($tmuxSession !== '') {
+            Opencode::tmuxNewWindow($tmuxSession, $inner);
+        } else {
+            exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
+        }
+        Opencode::focusTerminal();
+        orc_redirect($redirect, '', 'Started new opencode session in "' . htmlspecialchars($clone['name']) . '".');
+    }
+
+    if ($action === 'set_session') {
+        $cloneId = isset($_POST['clone_id']) ? (int) $_POST['clone_id'] : 0;
+        $sessionId = trim(isset($_POST['session_id']) ? $_POST['session_id'] : '');
+        $redirect = trim(isset($_POST['redirect']) ? $_POST['redirect'] : '?page=clones');
+        $tmuxSession = Opencode::activeTmuxSession();
+
+        if (!$cloneId) {
+            orc_redirect($redirect, 'Clone id is required.');
+        }
+        if ($sessionId === '') {
+            orc_redirect($redirect, 'Session id is required.');
+        }
+
+        $clone = ContainerClone::get($cloneId);
+        if (!$clone) {
+            orc_redirect($redirect, 'Clone not found.');
+        }
+
+        $container = $clone['container_name'];
+        $status = Docker::getStatus($container);
+        if ($status !== 'running') {
+            orc_redirect($redirect, 'Clone container is not running.');
+        }
+
+        $cbin = Opencode::resolveContainerBinary($container);
+        if ($cbin === '') {
+            orc_redirect($redirect, 'opencode is not installed in container "' . $container . '".');
+        }
+
+        $dir = '/';
+        $volumes = json_decode($clone['volumes_json'], true);
+        if ($volumes) {
+            foreach ($volumes as $containerPath => $hp) {
+                $dir = $containerPath;
+                break;
+            }
+        }
+
+        $inner = "docker exec -it -e TERM=screen-256color -e LANG=C.UTF-8 -w " . escapeshellarg($dir) . " " . escapeshellarg($container) . " " . escapeshellarg($cbin) . " --session " . escapeshellarg($sessionId) . "; exec bash";
+        if ($tmuxSession !== '') {
+            Opencode::tmuxNewWindow($tmuxSession, $inner);
+        } else {
+            exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
+        }
+        Opencode::focusTerminal();
+        orc_redirect($redirect, '', 'Opened session "' . substr($sessionId, 0, 12) . '" in "' . htmlspecialchars($clone['name']) . '".');
+    }
 
     if ($action === 'session_start_server') {
         $container = trim(isset($_POST['container']) ? $_POST['container'] : '');
@@ -542,13 +567,31 @@ foreach ($clones as $key => $clone) {
     }
 }
 
-foreach ($clones as $clone) {
-    if (!empty($clone['source_container']) && !empty($clone['image'])) {
-        Database::saveImageMapping($clone['source_container'], $clone['image']);
+foreach ($clones as $key => $clone) {
+    $clones[$key]['active_session'] = null;
+    $clones[$key]['container_sessions'] = array();
+    if ($clones[$key]['status'] !== 'running') continue;
+
+    $dbPath = Opencode::detectContainerDb($clone['container_name']);
+    if ($dbPath === '') continue;
+
+    $containerSessions = Opencode::listContainerSessions($clone['container_name'], $dbPath);
+    if (!is_array($containerSessions) || empty($containerSessions)) continue;
+
+    $clones[$key]['container_sessions'] = $containerSessions;
+
+    foreach ($containerSessions as $cs) {
+        if (!empty($cs['archived'])) continue;
+        $clones[$key]['active_session'] = $cs;
+        break;
+    }
+
+    if ($clones[$key]['active_session']) {
+        $activeMap = Opencode::getContainerActiveStatuses($clone['container_name'], $dbPath);
+        $sid = $clones[$key]['active_session']['id'];
+        $clones[$key]['active_session']['is_active'] = isset($activeMap[$sid]) && $activeMap[$sid];
     }
 }
-
-$committedBySource = ContainerClone::committedImagesBySource();
 
 if ($basePage === 'logs') {
     header('Content-Type: text/plain');
@@ -558,11 +601,6 @@ if ($basePage === 'logs') {
         echo ContainerClone::logs($cloneId, $lines);
     }
     exit;
-}
-
-$imageList = array();
-if ($basePage === 'images') {
-    $imageList = Docker::listImages();
 }
 
 $dockerContainers = array();
@@ -665,9 +703,6 @@ ob_start();
 switch ($basePage) {
     case 'containers':
         require __DIR__ . '/../templates/containers.php';
-        break;
-    case 'images':
-        require __DIR__ . '/../templates/images.php';
         break;
     case 'clones':
         require __DIR__ . '/../templates/clones.php';

@@ -80,6 +80,10 @@ class Docker
         $tmpPath = $hostPath . '_tmp';
         if (is_dir($tmpPath)) {
             if (is_dir($hostPath)) {
+                if (strpos($hostPath, '/tmp/') !== 0 && $hostPath !== '/tmp') {
+                    Logger::log("BLOCKED: Refusing to delete host path outside /tmp: $hostPath");
+                    return;
+                }
                 self::removeDir($hostPath);
             }
             rename($tmpPath, $hostPath);
@@ -222,30 +226,6 @@ class Docker
         return $volumes;
     }
 
-    public static function listImages()
-    {
-        $config = require __DIR__ . '/../config.php';
-        $prefix = isset($config['containerPrefix']) ? $config['containerPrefix'] : 'ORC-';
-        $prefixLower = strtolower($prefix);
-
-        $output = shell_exec("docker images --format '{\"repo\":\"{{.Repository}}\",\"tag\":\"{{.Tag}}\",\"id\":\"{{.ID}}\",\"size\":\"{{.Size}}\",\"created\":\"{{.CreatedSince}}\"}' 2>/dev/null");
-        if ($output === null || $output === '') {
-            return array();
-        }
-
-        $images = array();
-        foreach (explode("\n", trim($output)) as $line) {
-            $line = trim($line);
-            if ($line === '') continue;
-            $data = json_decode($line, true);
-            if ($data && strpos(strtolower($data['repo']), $prefixLower) === 0) {
-                $images[] = $data;
-            }
-        }
-
-        return $images;
-    }
-
     public static function listAllImages()
     {
         $config = require __DIR__ . '/../config.php';
@@ -270,23 +250,6 @@ class Docker
         return $images;
     }
 
-    public static function inspectImage($image)
-    {
-        $escaped = escapeshellarg($image);
-        $output = shell_exec("docker inspect $escaped 2>/dev/null");
-        if ($output === null || $output === '') return null;
-
-        $data = json_decode($output, true);
-        return (is_array($data) && isset($data[0])) ? $data[0] : null;
-    }
-
-    public static function imageExists($image)
-    {
-        $escaped = escapeshellarg($image);
-        $output = shell_exec("docker image inspect $escaped 2>/dev/null");
-        return ($output !== null && $output !== '' && trim($output) !== '[]');
-    }
-
     public static function removeImage($repoTag)
     {
         $escaped = escapeshellarg($repoTag);
@@ -300,6 +263,10 @@ class Docker
 
     private static function removeDir($dir)
     {
+        if (strpos($dir, '/tmp/') !== 0 && $dir !== '/tmp') {
+            Logger::log("BLOCKED: Refusing to removeDir outside /tmp: $dir");
+            return;
+        }
         if (!is_dir($dir)) return;
         $files = array_diff(scandir($dir), array('.', '..'));
         foreach ($files as $file) {

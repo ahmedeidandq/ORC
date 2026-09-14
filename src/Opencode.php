@@ -329,7 +329,7 @@ class Opencode
         return $map;
     }
 
-    private static function getContainerActiveStatuses($container, $dbPath)
+    public static function getContainerActiveStatuses($container, $dbPath)
     {
         $dbPath = str_replace("'", "\\'", $dbPath);
         $script = "import sqlite3, json\n"

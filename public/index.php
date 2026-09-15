@@ -249,11 +249,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $container = trim(isset($_POST['container']) ? $_POST['container'] : '');
         $dir = trim(isset($_POST['directory']) ? $_POST['directory'] : '');
         $redirect = trim(isset($_POST['redirect']) ? $_POST['redirect'] : '?page=sessions');
+        $cloneId = isset($_POST['clone_id']) ? (int) $_POST['clone_id'] : 0;
         $tmuxSession = Opencode::activeTmuxSession();
 
         if ($sessionId === '') {
             orc_redirect($redirect, 'Session id is required.');
         }
+
+        $winName = '[ORC] ' . substr($sessionId, 0, 12);
 
         if ($container !== '') {
             if ($dir === '') {
@@ -265,7 +268,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $inner = "docker exec -it -e TERM=screen-256color -e LANG=C.UTF-8 -w " . escapeshellarg($dir) . " " . escapeshellarg($container) . " " . escapeshellarg($cbin) . " --session " . escapeshellarg($sessionId) . "; exec bash";
             if ($tmuxSession !== '') {
-                Opencode::tmuxNewWindow($tmuxSession, $inner);
+                Opencode::tmuxNewWindow($tmuxSession, $inner, $winName);
+                if ($cloneId) {
+                    Opencode::trackWindow($cloneId, $tmuxSession, $winName);
+                }
             } else {
                 exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
             }
@@ -281,7 +287,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $inner = "cd " . escapeshellarg($dir) . " && TERM=screen-256color " . escapeshellarg($bin) . " --session " . escapeshellarg($sessionId) . "; exec bash";
             if ($tmuxSession !== '') {
-                Opencode::tmuxNewWindow($tmuxSession, $inner);
+                Opencode::tmuxNewWindow($tmuxSession, $inner, $winName);
+                if ($cloneId) {
+                    Opencode::trackWindow($cloneId, $tmuxSession, $winName);
+                }
             } else {
                 exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
             }
@@ -325,9 +334,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        $winName = '[ORC] ' . $clone['name'];
         $inner = "docker exec -it -e TERM=screen-256color -e LANG=C.UTF-8 -w " . escapeshellarg($dir) . " " . escapeshellarg($container) . " " . escapeshellarg($cbin) . "; exec bash";
         if ($tmuxSession !== '') {
-            Opencode::tmuxNewWindow($tmuxSession, $inner);
+            Opencode::tmuxNewWindow($tmuxSession, $inner, $winName);
+            Opencode::trackWindow($cloneId, $tmuxSession, $winName);
         } else {
             exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
         }
@@ -373,14 +384,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        $winName = '[ORC] ' . $clone['name'] . ' - ' . substr($sessionId, 0, 12);
         $inner = "docker exec -it -e TERM=screen-256color -e LANG=C.UTF-8 -w " . escapeshellarg($dir) . " " . escapeshellarg($container) . " " . escapeshellarg($cbin) . " --session " . escapeshellarg($sessionId) . "; exec bash";
         if ($tmuxSession !== '') {
-            Opencode::tmuxNewWindow($tmuxSession, $inner);
+            Opencode::tmuxNewWindow($tmuxSession, $inner, $winName);
+            Opencode::trackWindow($cloneId, $tmuxSession, $winName);
         } else {
             exec("nohup gnome-terminal -- bash -c \"$inner\" > /dev/null 2>&1 &");
         }
         Opencode::focusTerminal();
         orc_redirect($redirect, '', 'Opened session "' . substr($sessionId, 0, 12) . '" in "' . htmlspecialchars($clone['name']) . '".');
+    }
+
+    if ($action === 'reconnect_session') {
+        $cloneId = isset($_POST['clone_id']) ? (int) $_POST['clone_id'] : 0;
+        $redirect = trim(isset($_POST['redirect']) ? $_POST['redirect'] : '?page=clones');
+
+        if (!$cloneId) {
+            orc_redirect($redirect, 'Clone id is required.');
+        }
+
+        $clone = ContainerClone::get($cloneId);
+        if (!$clone) {
+            orc_redirect($redirect, 'Clone not found.');
+        }
+
+        $tracked = Opencode::getTrackedWindow($cloneId);
+        if (!$tracked) {
+            $tracked = Opencode::findWindowByName('[ORC] ' . $clone['name']);
+        }
+
+        if ($tracked) {
+            $ok = Opencode::focusWindow($tracked['tmux_session'], $tracked['window_name']);
+            if ($ok) {
+                orc_redirect($redirect, '', 'Switched to opencode window for "' . htmlspecialchars($clone['name']) . '".');
+            }
+            Opencode::removeTrackedWindow($cloneId);
+        }
+
+        orc_redirect($redirect, 'No active opencode window found. Start a new session instead.');
     }
 
     if ($action === 'session_start_server') {
@@ -570,6 +612,7 @@ foreach ($clones as $key => $clone) {
 foreach ($clones as $key => $clone) {
     $clones[$key]['active_session'] = null;
     $clones[$key]['container_sessions'] = array();
+    $clones[$key]['tracked_window'] = Opencode::getTrackedWindow($clone['id']);
     if ($clones[$key]['status'] !== 'running') continue;
 
     $dbPath = Opencode::detectContainerDb($clone['container_name']);

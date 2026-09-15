@@ -62,6 +62,15 @@
                                 <?php endif; ?>
                                 <div style="margin-top: 0.3rem; display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap;">
                                     <form method="POST" style="display: inline;">
+                                        <input type="hidden" name="action" value="reconnect_session">
+                                        <input type="hidden" name="clone_id" value="<?= $clone['id'] ?>">
+                                        <input type="hidden" name="redirect" value="?page=clones">
+                                        <button type="submit" class="btn btn-primary btn-sm" title="Switch to opencode pane" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                                            Switch to Pane
+                                        </button>
+                                    </form>
+                                    <form method="POST" style="display: inline;">
                                         <input type="hidden" name="action" value="start_session">
                                         <input type="hidden" name="clone_id" value="<?= $clone['id'] ?>">
                                         <input type="hidden" name="redirect" value="?page=clones">

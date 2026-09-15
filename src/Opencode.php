@@ -240,12 +240,17 @@ class Opencode
         return $sessions[0];
     }
 
-    public static function tmuxNewWindow($session, $command)
+    public static function tmuxNewWindow($session, $command, $name = '')
     {
         if ($session === '') {
             return false;
         }
-        exec("tmux new-window -t " . escapeshellarg($session . ':') . " " . escapeshellarg($command) . " 2>&1");
+        $nameArg = ($name !== '') ? ' -n ' . escapeshellarg($name) : '';
+        exec("tmux new-window -t " . escapeshellarg($session . ':') . $nameArg . " " . escapeshellarg($command) . " 2>&1");
+        if ($name !== '') {
+            $target = escapeshellarg($session . ':' . $name);
+            exec("tmux select-pane -t $target -T " . escapeshellarg($name) . " 2>&1");
+        }
         return true;
     }
 
@@ -270,6 +275,74 @@ class Opencode
             return true;
         }
         return false;
+    }
+
+    private static $trackerPath = '/tmp/orc/pane_tracker.json';
+
+    public static function trackWindow($cloneId, $tmuxSession, $windowName)
+    {
+        $dir = dirname(self::$trackerPath);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $data = array();
+        if (file_exists(self::$trackerPath)) {
+            $data = json_decode(file_get_contents(self::$trackerPath), true);
+            if (!is_array($data)) $data = array();
+        }
+        $data[$cloneId] = array(
+            'tmux_session' => $tmuxSession,
+            'window_name'  => $windowName,
+            'created_at'   => date('Y-m-d H:i:s'),
+        );
+        file_put_contents(self::$trackerPath, json_encode($data, JSON_PRETTY_PRINT));
+    }
+
+    public static function getTrackedWindow($cloneId)
+    {
+        if (!file_exists(self::$trackerPath)) return null;
+        $data = json_decode(file_get_contents(self::$trackerPath), true);
+        if (!is_array($data) || !isset($data[$cloneId])) return null;
+        return $data[$cloneId];
+    }
+
+    public static function removeTrackedWindow($cloneId)
+    {
+        if (!file_exists(self::$trackerPath)) return;
+        $data = json_decode(file_get_contents(self::$trackerPath), true);
+        if (!is_array($data) || !isset($data[$cloneId])) return;
+        unset($data[$cloneId]);
+        file_put_contents(self::$trackerPath, json_encode($data, JSON_PRETTY_PRINT));
+    }
+
+    public static function focusWindow($tmuxSession, $windowName)
+    {
+        $escaped = escapeshellarg($tmuxSession . ':' . $windowName);
+        exec("tmux has-window -t $escaped 2>/dev/null", $output, $exit);
+        if ($exit !== 0) {
+            return false;
+        }
+        exec("tmux switch-client -t " . escapeshellarg($tmuxSession) . " 2>&1");
+        exec("tmux select-window -t $escaped 2>&1");
+        return self::focusTerminal();
+    }
+
+    public static function findWindowByName($name)
+    {
+        $out = trim(shell_exec("tmux list-windows -a -F '#{session_name}:#{window_index}:#{window_name}' 2>/dev/null"));
+        if ($out === '') {
+            return null;
+        }
+        foreach (explode("\n", $out) as $line) {
+            $parts = explode(':', trim($line), 3);
+            if (count($parts) === 3 && $parts[2] === $name) {
+                return array(
+                    'tmux_session' => $parts[0],
+                    'window_name'  => $parts[2],
+                );
+            }
+        }
+        return null;
     }
 
     public static function deleteSession($id, $container = '')
